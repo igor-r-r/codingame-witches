@@ -18,35 +18,6 @@ public class Player {
 
     private static final int INVENTORY_MAX = 10;
 
-    private static boolean isMoreEffective(Action current, Action target) {
-        if (isLossEqual(current, target)) {
-            return isMoreProfit(current, target);
-        }
-        return false;
-    }
-
-    private static boolean isLossEqual(Action current, Action target) {
-        return ((current.delta0 > 0 || current.delta0 == target.delta0)
-                && (current.delta1 > 0 || current.delta1 == target.delta1)
-                && (current.delta2 > 0 || current.delta2 == target.delta2)
-                && (current.delta3 > 0 || current.delta3 == target.delta3));
-    }
-
-    private static boolean isMoreProfit(Action current, Action target) {
-        return sumProfit(current) > sumProfit(target)
-                && (current.delta0 >= target.delta0)
-                && (current.delta1 >= target.delta1)
-                && (current.delta2 >= target.delta2)
-                && (current.delta3 >= target.delta3);
-    }
-
-    private static int sumProfit(Action action) {
-        return (action.delta0 > 0 ? action.delta0 : 0)
-                + (action.delta1 > 0 ? action.delta1 : 0)
-                + (action.delta2 > 0 ? action.delta2 : 0)
-                + (action.delta3 > 0 ? action.delta3 : 0);
-    }
-
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
 
@@ -76,6 +47,8 @@ public class Player {
             System.err.println("Spells: " + spells.stream().map(a -> Integer.toString(a.actionId)).collect(Collectors.joining(" ")));
             System.err.println("Effective: " + effectiveSpells.stream().map(a -> Integer.toString(a.actionId)).collect(Collectors.joining(" ")));
             System.err.println("Not effective: " + notEffectiveSpells.stream().map(a -> Integer.toString(a.actionId)).collect(Collectors.joining(" ")));
+            spells.removeAll(notEffectiveSpells);
+            System.err.println("Spells after removal: " + spells.stream().map(a -> Integer.toString(a.actionId)).collect(Collectors.joining(" ")));
 
             Optional<Action> maxFreeLearning = enoughTier0Learnings.stream()
                     .filter(Player::isFree)
@@ -90,32 +63,15 @@ public class Player {
             } else if (maxFreeLearning.isPresent()) {
                 System.out.println("LEARN " + maxFreeLearning.get().actionId);
             } else {
-                List<Action> canCastSpells = spells.stream()
-                        .filter(spell -> spell.castable && actionAffordable(spell, game.me))
-                        .filter(spell -> fitsInventory(spell, game.me))
-                        .filter(spell -> !isEnough(spell, potions, game.me))
-                        .collect(Collectors.toList());
-
-                if (canCastSpells.size() > 0) {
-                    Collections.shuffle(canCastSpells);
-
-                    System.out.println("CAST " + canCastSpells.get(0).actionId);
-                } else {
-                    List<Action> affordableLearnings = enoughTier0Learnings.stream()
-                            .filter(l -> actionAffordable(l, game.me))
-                            .collect(Collectors.toList());
-                    if (affordableLearnings.size() > 0) {
-                        Action bestLearning = affordableLearnings.stream()
-                                .max(Comparator.comparing(Player::sumDelta))
-                                .get();
-                        System.out.println("LEARN " + bestLearning.actionId);
-                    } else {
+                if (!tryCastSpells(spells, notEffectiveSpells, potions, game)) {
+                    if (!tryLearnSpell(enoughTier0Learnings, game)) {
                         System.out.println("REST");
-
                     }
                 }
+
             }
         }
+    }
 
             /*
             0.1. Add spell learning
@@ -130,7 +86,79 @@ public class Player {
             3. Build path to potion
              */
 
-        // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
+    // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
+
+
+    private static boolean tryCastSpells(List<Action> spells, Set<Action> notEffectiveSpells, List<Action> potions, Game game) {
+        List<Action> canCastSpells = spells.stream()
+                .filter(spell -> spell.castable && actionAffordable(spell, game.me))
+                .filter(spell -> fitsInventory(spell, game.me))
+                .filter(spell -> !isEnough(spell, potions, game.me))
+                .collect(Collectors.toList());
+
+        List<Action> castableNotEffectiveSpells = notEffectiveSpells.stream()
+                .filter(spell -> spell.castable && actionAffordable(spell, game.me))
+                .filter(spell -> fitsInventory(spell, game.me))
+                .filter(spell -> !isEnough(spell, potions, game.me))
+                .collect(Collectors.toList());
+
+        if (canCastSpells.size() > 0) {
+            Collections.shuffle(canCastSpells);
+
+            System.out.println("CAST " + canCastSpells.get(0).actionId);
+            return true;
+        } else if (castableNotEffectiveSpells.size() > 0) {
+            Collections.shuffle(castableNotEffectiveSpells);
+
+            System.out.println("CAST " + castableNotEffectiveSpells.get(0).actionId);
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean tryLearnSpell(List<Action> enoughTier0Learnings, Game game) {
+        List<Action> affordableLearnings = enoughTier0Learnings.stream()
+                .filter(l -> actionAffordable(l, game.me))
+                .collect(Collectors.toList());
+        if (affordableLearnings.size() > 0) {
+            Action bestLearning = affordableLearnings.stream()
+                    .max(Comparator.comparing(Player::sumDelta))
+                    .get();
+            System.out.println("LEARN " + bestLearning.actionId);
+            return true;
+        }
+
+        return false;
+    }
+
+
+    private static boolean isMoreEffective(Action current, Action target) {
+        if (isLossEqual(current, target)) {
+            return isMoreProfit(current, target);
+        }
+        return false;
+    }
+
+    private static boolean isLossEqual(Action current, Action target) {
+        return ((current.delta0 > 0 || current.delta0 == target.delta0)
+                && (current.delta1 > 0 || current.delta1 == target.delta1)
+                && (current.delta2 > 0 || current.delta2 == target.delta2)
+                && (current.delta3 > 0 || current.delta3 == target.delta3));
+    }
+
+    private static boolean isMoreProfit(Action current, Action target) {
+        return sumProfit(current) > sumProfit(target)
+                && (current.delta0 >= target.delta0)
+                && (current.delta1 >= target.delta1)
+                && (current.delta2 >= target.delta2)
+                && (current.delta3 >= target.delta3);
+    }
+
+    private static int sumProfit(Action action) {
+        return (action.delta0 > 0 ? action.delta0 : 0)
+                + (action.delta1 > 0 ? action.delta1 : 0)
+                + (action.delta2 > 0 ? action.delta2 : 0)
+                + (action.delta3 > 0 ? action.delta3 : 0);
     }
 
 
