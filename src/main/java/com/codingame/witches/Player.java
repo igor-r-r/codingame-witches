@@ -5,10 +5,11 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+// in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
 
 /**
  * Auto-generated code below aims at helping you parse
@@ -17,6 +18,8 @@ import java.util.stream.Collectors;
 public class Player {
 
     private static final int INVENTORY_MAX = 10;
+    private static final int FIRST_FREE_LEARN_LIMIT = 6;
+    private static int roundCounter = 0;
 
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
@@ -32,65 +35,89 @@ public class Player {
             List<Action> learnings = game.actions.stream().filter(a -> a.actionType.equals("LEARN")).collect(Collectors.toList());
             List<Action> enoughTier0Learnings = learnings.stream().filter(learning -> hasEnoughTier0(learning, game.me)).collect(Collectors.toList());
 
-            // separate spells by effectiveness
-            Set<Action> effectiveSpells = new HashSet<>();
-            Set<Action> notEffectiveSpells = new HashSet<>();
+            if (roundCounter < FIRST_FREE_LEARN_LIMIT) {
+                roundCounter++;
+                System.out.println("LEARN " + learnings.get(0).actionId);
+                continue;
+            }
 
-            spells.forEach(spell ->
-                    spells.forEach(s -> {
-                        if (isMoreEffective(spell, s)) {
-                            effectiveSpells.add(spell);
-                            notEffectiveSpells.add(s);
-                        }
-                    }));
+            //Optional<Action> maxFreeLearning = enoughTier0Learnings.stream()
+            //        .filter(Player::isFree)
+            //        .max(Comparator.comparing(Player::sumDelta));
 
-            System.err.println("Spells: " + spells.stream().map(a -> Integer.toString(a.actionId)).collect(Collectors.joining(" ")));
-            System.err.println("Effective: " + effectiveSpells.stream().map(a -> Integer.toString(a.actionId)).collect(Collectors.joining(" ")));
-            System.err.println("Not effective: " + notEffectiveSpells.stream().map(a -> Integer.toString(a.actionId)).collect(Collectors.joining(" ")));
-            spells.removeAll(notEffectiveSpells);
-            System.err.println("Spells after removal: " + spells.stream().map(a -> Integer.toString(a.actionId)).collect(Collectors.joining(" ")));
-
-            Optional<Action> maxFreeLearning = enoughTier0Learnings.stream()
-                    .filter(Player::isFree)
-                    .max(Comparator.comparing(Player::sumDelta));
-
+            // check if we can make any potion
             if (affordablePotions.size() > 0) {
                 Action action = potions.stream()
                         .filter(c -> actionAffordable(c, game.me))
                         .max(Comparator.comparing(Action::getPrice))
                         .get();
                 System.out.println("BREW " + action.actionId);
-            } else if (maxFreeLearning.isPresent()) {
-                System.out.println("LEARN " + maxFreeLearning.get().actionId);
-            } else {
-                if (!tryCastSpells(spells, notEffectiveSpells, potions, game)) {
-                    if (!tryLearnSpell(enoughTier0Learnings, game)) {
-                        System.out.println("REST");
+                continue;
+            }
+
+            Action spellForFuture = null;
+            int price = 0;
+            for (Action potion : potions) {
+                for (Action spell : spells) {
+                    if (canBrewAfterSpell(potion, spell, game.me)) {
+                        if (spell.castable
+                                && actionAffordable(spell, game.me)
+                                && fitsInventory(spell, game.me)) {
+                            if (price < potion.price) {
+                                spellForFuture = spell;
+                            }
+                        }
                     }
                 }
-
             }
+
+            if (spellForFuture != null) {
+                System.out.println("CAST " + spellForFuture.actionId);
+            }
+
+            // separate spells by effectiveness
+            Set<Action> notEffectiveSpells = notEffectiveSpells(spells);
+
+            // leave only effective spells in main spell set
+            spells.removeAll(notEffectiveSpells);
+
+            //// check if there is a spell with only profit available to learn
+            //if (maxFreeLearning.isPresent()) {
+            //    System.out.println("LEARN " + maxFreeLearning.get().actionId);
+            //    continue;
+            //}
+
+            if (!tryCastSpells(spells, notEffectiveSpells, potions, game)) {
+                if (!tryLearnSpell(enoughTier0Learnings, game)) {
+                    System.out.println("REST");
+                }
+            }
+
         }
     }
 
-            /*
-            0.1. Add spell learning
-            0.2. Add Repeatable
+    private static boolean canBrewAfterSpell(Action potion, Action spell, Witch me) {
+        return me.inv0 + potion.delta0 + spell.delta0 >= 0
+                && me.inv1 + potion.delta1 + spell.delta1 >= 0
+                && me.inv2 + potion.delta2 + spell.delta2 >= 0
+                && me.inv3 + potion.delta3 + spell.delta3 >= 0;
 
-            Improvements:
-            1. Don't use less effective spells
+    }
 
+    private static Set<Action> notEffectiveSpells(List<Action> spells) {
+        Set<Action> notEffectiveSpells = new HashSet<>();
 
-            1. Calculate all distances to potions
-            2. Get potion with min distance
-            3. Build path to potion
-             */
-
-    // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-
+        spells.forEach(spell ->
+                spells.forEach(s -> {
+                    if (isMoreEffective(spell, s)) {
+                        notEffectiveSpells.add(s);
+                    }
+                }));
+        return notEffectiveSpells;
+    }
 
     private static boolean tryCastSpells(List<Action> spells, Set<Action> notEffectiveSpells, List<Action> potions, Game game) {
-        List<Action> canCastSpells = spells.stream()
+        List<Action> castableSpells = spells.stream()
                 .filter(spell -> spell.castable && actionAffordable(spell, game.me))
                 .filter(spell -> fitsInventory(spell, game.me))
                 .filter(spell -> !isEnough(spell, potions, game.me))
@@ -102,10 +129,10 @@ public class Player {
                 .filter(spell -> !isEnough(spell, potions, game.me))
                 .collect(Collectors.toList());
 
-        if (canCastSpells.size() > 0) {
-            Collections.shuffle(canCastSpells);
+        if (castableSpells.size() > 0) {
+            Collections.shuffle(castableSpells);
 
-            System.out.println("CAST " + canCastSpells.get(0).actionId);
+            System.out.println("CAST " + castableSpells.get(0).actionId);
             return true;
         } else if (castableNotEffectiveSpells.size() > 0) {
             Collections.shuffle(castableNotEffectiveSpells);
