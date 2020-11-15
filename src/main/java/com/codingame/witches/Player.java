@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Scanner;
 import java.util.stream.Collectors;
 
@@ -26,32 +27,58 @@ public class Player {
             List<Action> affordablePotions = potions.stream().filter(c -> actionAffordable(c, game.me)).collect(Collectors.toList());
 
             List<Action> spells = game.actions.stream().filter(a -> a.actionType.equals("CAST")).collect(Collectors.toList());
-            //List<Action> affordableSpells = spells.stream().filter(c -> actionAffordable(c, game.me)).collect(Collectors.toList());
-            //List<Action> castableSpells = spells.stream().filter(c -> c.castable).collect(Collectors.toList());
+            List<Action> learnings = game.actions.stream().filter(a -> a.actionType.equals("LEARN")).collect(Collectors.toList());
+            List<Action> enoughTier0Learnings = learnings.stream().filter(learning -> hasEnoughTier0(learning, game.me)).collect(Collectors.toList());
 
-            if (affordablePotions.size() > 0) {
-                Action action = potions.stream()
-                        .filter(c -> actionAffordable(c, game.me))
-                        .max(Comparator.comparing(Action::getPrice))
-                        .get();
-                System.out.println("BREW " + action.actionId);
+            Optional<Action> maxFreeLearning = enoughTier0Learnings.stream()
+                    .filter(Player::isFree)
+                    .max(Comparator.comparing(Player::sumDelta));
+
+            if (maxFreeLearning.isPresent()) {
+                System.out.println("LEARN " + maxFreeLearning.get().actionId);
             } else {
-                List<Action> canCastSpells = spells.stream()
-                        .filter(spell -> spell.castable && actionAffordable(spell, game.me))
-                        .filter(spell -> fitsInventory(spell, game.me))
-                        .filter(spell -> !isEnough(spell, potions, game.me))
-                        .collect(Collectors.toList());
-
-                if (canCastSpells.size() > 0) {
-                    canCastSpells.forEach(System.err::println);
-                    Collections.shuffle(canCastSpells);
-                    canCastSpells.forEach(System.err::println);
-
-                    System.out.println("CAST " + canCastSpells.get(0).actionId);
+                if (affordablePotions.size() > 0) {
+                    Action action = potions.stream()
+                            .filter(c -> actionAffordable(c, game.me))
+                            .max(Comparator.comparing(Action::getPrice))
+                            .get();
+                    System.out.println("BREW " + action.actionId);
                 } else {
-                    System.out.println("REST");
+                    List<Action> canCastSpells = spells.stream()
+                            .filter(spell -> spell.castable && actionAffordable(spell, game.me))
+                            .filter(spell -> fitsInventory(spell, game.me))
+                            .filter(spell -> !isEnough(spell, potions, game.me))
+                            .collect(Collectors.toList());
+
+                    if (canCastSpells.size() > 0) {
+                        Collections.shuffle(canCastSpells);
+
+                        System.out.println("CAST " + canCastSpells.get(0).actionId);
+                    } else {
+                        List<Action> affordableLearnings = enoughTier0Learnings.stream()
+                                .filter(l -> actionAffordable(l, game.me))
+                                .collect(Collectors.toList());
+                        if (affordableLearnings.size() > 0) {
+                            Action bestLearning = affordableLearnings.stream()
+                                    .max(Comparator.comparing(Player::sumDelta))
+                                    .get();
+                            System.out.println("LEARN " + bestLearning.actionId);
+                        } else {
+                            System.out.println("REST");
+
+                        }
+                    }
                 }
             }
+
+            /*
+            0.1. Add spell learning
+                -
+            0.2. Add Repeatable
+            1. Calculate all distances to potions
+            2. Get potion with min distance
+            3. Build path to potion
+             */
 
             // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
         }
@@ -88,9 +115,19 @@ public class Player {
         int spellSum = spell.delta0 + spell.delta1 + spell.delta2 + spell.delta3;
         int invSum = me.inv0 + me.inv1 + me.inv2 + me.inv3;
         return invSum + spellSum <= INVENTORY_MAX;
-
     }
 
+    private static boolean isFree(Action learning) {
+        return learning.delta0 >= 0 && learning.delta1 >= 0 && learning.delta2 >= 0 && learning.delta3 >= 0;
+    }
+
+    private static int sumDelta(Action action) {
+        return action.delta0 + action.delta1 + action.delta2 + action.delta3;
+    }
+
+    private static boolean hasEnoughTier0(Action learning, Witch me) {
+        return me.inv0 >= learning.tomeIndex;
+    }
 }
 
 class Game {
@@ -150,12 +187,17 @@ class Action {
     int price; // the price in rupees if this is a potion
 
     int tomeIndex; // in the first two leagues: always 0; later: the index in the tome if this is a tome spell, equal to the read-ahead tax
+
     int taxCount; // in the first two leagues: always 0; later: the amount of taxed tier-0 ingredients you gain from learning this spell
     boolean castable; // in the first league: always 0; later: 1 if this is a castable player spell
     boolean repeatable; // for the first two leagues: always 0; later: 1 if this is a repeatable player spell
 
     public int getPrice() {
         return price;
+    }
+
+    public int getTomeIndex() {
+        return tomeIndex;
     }
 }
 
